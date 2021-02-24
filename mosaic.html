@@ -1,0 +1,363 @@
+<!-- 作者：姚凯伦 -->
+<!-- 时间：2021-01-01 -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>mosaic demo</title>
+  <style>
+    html, body, #root, .container, .grid {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      margin: 0;
+      padding: 0;
+    }
+
+    .grid {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .grid-row {
+      flex: 1;
+      display: flex;
+      flex-direction: row;
+    }
+
+    .grid-cell {
+      flex: 1;
+      border-right: 1px solid #eee;
+      border-bottom: 1px solid #eee;
+      transition: background-color .5s ease-in;
+      cursor: pointer;
+    }
+
+    .tooltip {
+      position: fixed;
+      top: 0;
+      right: 0;
+      padding: 12px;
+      background-color: rgba(0, 0, 0, .3);
+      color: #fff;
+      font-size: 18px;
+      font-weight: bold;
+      opacity: 0;
+      transition: opacity ease-in .2s;
+      pointer-events: none;
+      border-bottom-left-radius: 5px;
+    }
+
+    .tooltip-show {
+      opacity: 1;
+    }
+
+    .input-dialog {
+      position: fixed;
+      left: 0;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      background-color: rgba(0, 0, 0, .6);
+    }
+
+    .input-dialog-content {
+      position: absolute;
+      left: 50%;
+      top: 20%;
+      transform: translateX(-50%);
+      width: 400px;
+      height: 200px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-color: #fff;
+      border-radius: 5px;
+    }
+
+    .input-dialog-content div:first-of-type {
+      position: absolute;
+      left: 15px;
+      top: 15px;
+    }
+
+    .input-dialog-content input {
+      width: 70px;
+      line-height: 20px;
+      border: 0;
+      border-bottom: 1px solid #000;
+      margin: 0 10px;
+      font-size: 18px;
+      font-weight: bold;
+      text-align: center;
+      outline: none;
+    }
+
+    .input-dialog-content button {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: 20px;
+      width: 70px;
+      height: 28px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://cdn.staticfile.org/react/17.0.1/umd/react.production.min.js" crossorigin></script>
+  <script src="https://cdn.staticfile.org/react-dom/17.0.1/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.12.12/babel.min.js" crossorigin></script>
+  <script type="text/babel">
+    const defaultColor = 'rgba(0, 0, 0, 0)';
+    const defaultRowCount = 30;
+    const defaultColCount = 60;
+    const maxRowCount = 1000;
+    const maxColCount = 1000;
+
+    class App extends React.Component {
+      constructor(props) {
+        super(props)
+      
+        this.visiteGrid = []; // DFS 时，记录节点的访问状态
+        this.tooltipTimer = null;
+        this.state = {
+          gridRowCount: defaultRowCount,
+          gridColCount: defaultColCount,
+          grid: [], // 网格二维数组
+          colorIslandAmount: 0, // 颜色岛数量
+          showInputDialog: true,
+          showTooltip: false,
+        }
+      }
+
+      componentDidMount() {
+        this.generateGrid(true); // 在用户输入网格行列前，先使用默认数据生成网格
+        document.addEventListener('contextmenu', event => event.preventDefault());
+        document.addEventListener('keydown', this.handleKeyboardEvent);
+      }
+
+      componentWillUnmount() {
+        document.removeEventListener('keydown', this.handleKeyboardEvent);
+      }
+
+      generateGrid = (isInit = false) => {
+        const { gridRowCount, gridColCount } = this.state;
+
+        if (gridRowCount <= 0 || gridRowCount > maxRowCount || gridColCount <= 0 || gridColCount > maxColCount ) {
+          console.error('输入不合法', gridRowCount, gridColCount);
+          return;
+        }
+
+        const grid = [];
+        for (var i = 0; i < gridRowCount; i++) {
+          grid[i] = [];
+          for (var j = 0; j < gridColCount; j++) {
+            grid[i][j] = {
+              color: defaultColor,
+            };
+          }
+        }
+
+        this.setState({
+          grid,
+          showInputDialog: isInit,
+        });
+      }
+
+      getRandomColor() {
+        const getRandomNumber = () => {
+          const num = Math.floor(Math.random() * 256).toString(16);
+          return num.length === 1 ? '0' + num : num;
+        };
+        const randomColor = '#' + getRandomNumber() + getRandomNumber() + getRandomNumber(); // TODO: 防止生成白色
+        return randomColor;
+      }
+
+      handleCellClick = (event, rowIndex, colIndex) => {
+        const grid = this.state.grid;
+        // 已经生成了颜色的单元格不再重新生成
+        if (grid[rowIndex][colIndex].color !== defaultColor) {
+          return;
+        }
+
+        grid[rowIndex][colIndex] = {
+          color: this.getRandomColor(),
+        };
+        this.setState({ grid }, () => this.showColorIslandAmount(event));
+      }
+
+      handleCellRightClick = (event, rowIndex, colIndex) => {
+        if (event.button === 2) {
+          const grid = this.state.grid;
+          grid[rowIndex][colIndex] = {
+            color: defaultColor,
+          }
+          this.setState({ grid }, () => this.showColorIslandAmount(event));
+        }
+      }
+
+      handleKeyboardEvent = (event) => {
+        const { gridRowCount, gridColCount } = this.state;
+        // 监听敲击 C 键
+        if (event.keyCode === 67) { // TODO: 区分按住 ctrl/shift 情况
+          const grid = this.state.grid;
+          for (var i = 0; i < gridRowCount; i++) {
+            for (var j = 0; j < gridColCount; j++) {
+              if (grid[i][j].color !== defaultColor) {
+                grid[i][j].color = this.getRandomColor();
+              }
+            }
+          }
+
+          this.setState({ grid });
+        }
+      }
+
+      resetVisiteGrid = () => {
+        const { gridRowCount, gridColCount } = this.state;
+        for (var i = 0; i < gridRowCount; i++) {
+          this.visiteGrid[i] = [];
+          for (var j = 0; j < gridColCount; j++) {
+            this.visiteGrid[i][j] = false;
+          }
+        }
+      }
+
+      showColorIslandAmount = (event) => {
+        clearInterval(this.tooltipTimer);
+        const amount = this.calcColorIslandAmount();
+        this.setState({
+          showTooltip: true,
+          colorIslandAmount: amount,
+        })
+
+        this.tooltipTimer = setTimeout(() => {
+          this.setState({
+            showTooltip: false,
+          })
+        }, 1000);
+      }
+
+      // 计算颜色岛的数量
+      calcColorIslandAmount = () => {
+        const { gridRowCount, gridColCount, grid } = this.state;
+        let amount = 0;
+        this.resetVisiteGrid();
+        for (var i = 0; i < gridRowCount; i++) {
+          for (var j = 0; j < gridColCount; j++) {
+            if (grid[i][j].color !== defaultColor && !this.visiteGrid[i][j]) {
+              this.findSameIslandByDFS(grid, i, j);
+              amount++;
+            }
+          }
+        }
+
+        return amount;
+      }
+
+      // 通过深度优先遍历，标识在相同颜色岛的单元格
+      findSameIslandByDFS = (grid, rowIndex, colIndex) => {
+        if (!grid[rowIndex] || !grid[rowIndex][colIndex] || grid[rowIndex][colIndex].color === defaultColor ||  this.visiteGrid[rowIndex][colIndex]) {
+          return;
+        }
+
+        this.visiteGrid[rowIndex][colIndex] = true;
+
+        // 当前单元格的正上、正右、正下、正左方向
+        const direction = [[-1, 0], [0, 1], [1, 0], [0, -1]];
+        direction.forEach(item => this.findSameIslandByDFS(grid, rowIndex + item[0], colIndex + item[1]));
+      }
+
+      handleGridRowCountChange = (event) => {
+        let value = event.target.value || '0';
+        value = value.replace(/\D/g, '');
+        this.setState({
+          gridRowCount: parseInt(value),
+        })
+      }
+
+      handleGridColCountChange = (event) => {
+        let value = event.target.value || '0';
+        value = value.replace(/\D/g, '');
+        this.setState({
+          gridColCount: parseInt(value),
+        })
+      }
+
+      renderGrid = () => {
+        const { grid } = this.state;
+        return (
+          <div className="grid">
+            {
+              grid.map((row, rowIndex) => (
+                <div className="grid-row" key={rowIndex}>
+                  {row.map((cell, colIndex) => this.renderGridCell(cell, rowIndex, colIndex))}
+                </div>
+              ))
+            }
+          </div>
+        )
+      }
+
+      renderGridCell = (cell, rowIndex, colIndex) => {
+        return (
+          <div
+            className="grid-cell"
+            key={`${rowIndex}-${colIndex}`}
+            data-key={`${rowIndex}-${colIndex}`}
+            onClick={(e) => this.handleCellClick(e, rowIndex, colIndex)}
+            onMouseDown={(e) => this.handleCellRightClick(e, rowIndex, colIndex)}
+            style={{ backgroundColor: cell.color }}
+          />
+        )
+      }
+
+      renderTooltip = () => {
+        const { showTooltip, colorIslandAmount } = this.state;
+        return (
+          <div className={`tooltip ${showTooltip ? 'tooltip-show' : ''}`}>
+            颜色岛数量：{ colorIslandAmount }
+          </div>
+        );
+      }
+
+      renderInputDialog = () => {
+        const { showInputDialog } = this.state;
+        if (!showInputDialog) {
+          return null;
+        }
+
+        return (
+          <div className="input-dialog">
+            <div className="input-dialog-content">
+              <div>请输入网格数：</div>
+              <div>
+                <input value={this.state.gridRowCount} onChange={this.handleGridRowCountChange}/> ×
+                <input value={this.state.gridColCount} onChange={this.handleGridColCountChange}/>
+              </div>
+              <button onClick={() => this.generateGrid()}>确认</button>
+            </div>
+          </div>
+        )
+      }
+
+      render() {
+        return (
+          <div className="container">
+            {this.renderGrid()}
+            {this.renderTooltip()}
+            {this.renderInputDialog()}
+          </div>
+        )
+      }
+    }
+
+    const root = document.querySelector('#root');
+    ReactDOM.render(<App/>, root);
+  </script>
+</body>
+</html>
